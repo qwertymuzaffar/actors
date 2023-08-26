@@ -1,5 +1,6 @@
 import { ValidationService } from "./services/validation.service";
 
+// Interfaces for Actor and Movie
 export interface Actor {
   actorId: number;
   name: string;
@@ -11,19 +12,21 @@ export interface Movie {
   actors: Array<number>;
 }
 
+// Interface for validation data
 interface ValidationData {
   Name: string;
   KRMovies: string[];
   NCMovies: string[];
 }
 
+// Constants for actor names
 export const KEANU_REEVES = 'Keanu Reeves';
 export const NICOLAS_CAGE = 'Nicolas Cage';
 
 import { Component, OnInit } from '@angular/core';
 import { ActorsService } from "./services/actors.service";
 import { MoviesService } from "./services/movies.service";
-import { map, Subject, switchMap, takeUntil, tap } from "rxjs";
+import { combineLatest, map, Observable, Subject, switchMap, takeUntil, tap } from "rxjs";
 
 @Component({
   selector: 'app-root',
@@ -33,10 +36,10 @@ import { map, Subject, switchMap, takeUntil, tap } from "rxjs";
 export class AppComponent implements OnInit{
   title = 'actors';
 
-  actorsWithBoth: Actor[] = [];
-  validationResults: any;
+  actorsWithBoth: Actor[] = []; // Array to store actors with both Nicolas Cage and Keanu Reeves
+  validationResults: any; // Variable to store validation results
 
-  private _destroy$ = new Subject();
+  private _destroy$ = new Subject(); // Subject to manage subscription cleanup
 
   constructor(
     private actorsService: ActorsService,
@@ -46,55 +49,80 @@ export class AppComponent implements OnInit{
   }
 
   ngOnInit() {
-
-    this.actorsService.getActors()
-      .pipe(
-        takeUntil(this._destroy$),
-        tap((actorsData: Actor[]) => {
-          const keanu = actorsData.find((actor: Actor) => actor.name === KEANU_REEVES);
-          const nicolas = actorsData.find((actor: Actor) => actor.name === NICOLAS_CAGE);
-
-          if (keanu && nicolas) {
-            this.fetchMoviesWithBothActors(keanu.actorId, nicolas.actorId, actorsData);
-          } else {
-            console.error('Keanu Reeves or Nicolas Cage data not found.');
-          }
-        }),
-      )
-      .subscribe(() => {});
+    this.fetchAndProcessData(); // Initiate data fetching and processing
   }
 
-  fetchMoviesWithBothActors(keanuId: number, nicolasId: number, actorsData: any): void {
-    this.moviesService.getMovies()
+  fetchAndProcessData() {
+    // Combine actors and movies observables and handle data processing
+    combineLatest([
+      this.actorsService.getActors(),
+      this.moviesService.getMovies()
+    ])
       .pipe(
-        map((moviesData) => {
-          // Find movies with Keanu Reeves and Nicolas Cage separately
-          const keanuMovies = moviesData.filter((movie: Movie) => movie.actors.includes(keanuId));
-          const nicolasMovies = moviesData.filter((movie: Movie) => movie.actors.includes(nicolasId));
+        takeUntil(this._destroy$), // Unsubscribe when component is destroyed
+        switchMap(([actorsData, moviesData]) => {
+          const keanu = this.findActorByName(actorsData, KEANU_REEVES);
+          const nicolas = this.findActorByName(actorsData, NICOLAS_CAGE);
 
-          // Extract actor IDs from the movies of Keanu Reeves and Nicolas Cage
-          const keanuActorIds = new Set(keanuMovies.flatMap((movie: Movie) => movie.actors));
-          const nicolasActorIds = new Set(nicolasMovies.flatMap((movie: Movie) => movie.actors));
+          if (!keanu || !nicolas) {
+            console.error('Keanu Reeves or Nicolas Cage data not found.');
+            return [];
+          }
+
+          // Find movies with Keanu Reeves and Nicolas Cage separately
+          const keanuMovies = this.getMoviesWithActor(moviesData, keanu.actorId);
+          const nicolasMovies = this.getMoviesWithActor(moviesData, nicolas.actorId);
 
           // Find actors who have been in movies with both Nicolas Cage and Keanu Reeves
-          this.actorsWithBoth = Array.from(keanuActorIds)
-            .filter(actorId => nicolasActorIds.has(actorId))
-            .map(actorId => {
-              return actorsData.find((actor: Actor) => actor.actorId === actorId);
-            });
+          this.actorsWithBoth = this.findActorsWithBoth(keanuMovies, nicolasMovies, actorsData);
 
-          return this.prepareValidationData(this.actorsWithBoth, keanuMovies, nicolasMovies);
-        }),
-        switchMap((validationData)=> this.validationService.validateResults(validationData)),
-        takeUntil(this._destroy$)
+          // Prepare validation data
+          const validationData = this.prepareValidationData(this.actorsWithBoth, keanuMovies, nicolasMovies);
+
+          // Validate results and set validationResults variable
+          return this.validateAndSetResults(validationData);
+        })
       )
-      .subscribe(
-      (validationResults) => {
-        this.validationResults = validationResults;
-      }
-    );
+      .subscribe(); // Subscribe to the combined observable
   }
 
+  // Method to find actor by name
+  findActorByName(actorsData: Actor[], name: string): Actor | undefined {
+    return actorsData.find((actor: Actor) => actor.name === name);
+  }
+
+  // Method to get movies with a specific actor
+  getMoviesWithActor(moviesData: Movie[], actorId: number): Movie[] {
+    return moviesData.filter((movie: Movie) => movie.actors.includes(actorId));
+  }
+
+  // Method to get movies with a specific actor
+  findActorsWithBoth(keanuMovies: Movie[], nicolasMovies: Movie[], actorsData: Actor[]): Actor[] {
+
+    // Extract actor IDs from the movies of Keanu Reeves and Nicolas Cage
+    const keanuActorIds = new Set(keanuMovies.flatMap((movie: Movie) => movie.actors));
+    const nicolasActorIds = new Set(nicolasMovies.flatMap((movie: Movie) => movie.actors));
+
+    // Find actors who have been in movies with both Nicolas Cage and Keanu Reeves
+    return Array.from(keanuActorIds)
+      .filter(actorId => nicolasActorIds.has(actorId))
+      .map(actorId => {
+        return actorsData.find((actor: Actor) => actor.actorId === actorId);
+      })
+      .filter((actor: Actor | undefined): actor is Actor => actor !== undefined); // Filter out undefined actors
+  }
+
+  // Method to validate results and set validationResults variable
+  validateAndSetResults(validationData: ValidationData[]): Observable<any> {
+    return this.validationService.validateResults(validationData)
+      .pipe(
+        tap((validationResults) => {
+          this.validationResults = validationResults;
+        })
+      );
+  }
+
+  // Method to prepare validation data
   prepareValidationData(actorsWithBoth: Actor[], keanuMovies: Movie[], nicolasMovies: Movie[]): ValidationData[] {
     return actorsWithBoth.map(actor => {
       const actorId = actor.actorId;
@@ -110,7 +138,7 @@ export class AppComponent implements OnInit{
   }
 
   ngOnDestroy(): void {
-    this._destroy$.next(true);
-    this._destroy$.unsubscribe();
+    this._destroy$.next(true); // Signal subject to complete and unsubscribe
+    this._destroy$.unsubscribe(); // Unsubscribe from observables
   }
 }
