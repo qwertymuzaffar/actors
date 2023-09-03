@@ -23,10 +23,12 @@ interface ValidationData {
 export const KEANU_REEVES = 'Keanu Reeves';
 export const NICOLAS_CAGE = 'Nicolas Cage';
 
+export const EMPTY = new Observable<never>((subscriber) => subscriber.complete());
+
 import { Component, OnInit } from '@angular/core';
 import { ActorsService } from "./services/actors.service";
 import { MoviesService } from "./services/movies.service";
-import { combineLatest, map, Observable, Subject, switchMap, takeUntil, tap } from "rxjs";
+import { combineLatest, map, Observable, of, Subject, switchMap, takeUntil, tap } from "rxjs";
 
 @Component({
   selector: 'app-root',
@@ -66,7 +68,7 @@ export class AppComponent implements OnInit{
 
           if (!keanu || !nicolas) {
             console.error('Keanu Reeves or Nicolas Cage data not found.');
-            return [];
+            return EMPTY;
           }
 
           // Find movies with Keanu Reeves and Nicolas Cage separately
